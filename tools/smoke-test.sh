@@ -29,6 +29,9 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 command -v "$QEMU" >/dev/null 2>&1 || { bad "no $QEMU"; exit 1; }
+# GitHub artifact and release downloads strip the exec bit; say so rather than
+# reporting an empty extraction
+[ -x "$IMAGE" ] || { bad "not executable: $IMAGE (chmod +x it)"; exit 1; }
 
 # 1. run the runtime; the exec of AppRun is expected to fail under qemu, the
 #    extraction is not
