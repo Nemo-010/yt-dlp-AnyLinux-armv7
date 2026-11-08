@@ -73,7 +73,8 @@ cli=$(PYTHONHOME=$ROOT/share "$QEMU" "$LOADER" --library-path "$ROOT/lib" \
 	&& ok "AppRun.sh parses with the bundled dash" \
 	|| { bad "AppRun.sh does not parse"; sed 's/^/    /' "$TMP/sherr"; }
 
-# 4. optional live TLS check
+# 4. optional live TLS check. Informational by default: a DNS or upstream outage
+#    must not turn a good build red. Set YTDLP_NETWORK_TEST_STRICT=1 to gate on it.
 if [ "${YTDLP_NETWORK_TEST-}" = 1 ]; then
 	if PYTHONHOME=$ROOT/share SSL_CERT_FILE=$ROOT/share/ca/ca-certificates.crt \
 		"$QEMU" "$LOADER" --library-path "$ROOT/lib" "$ROOT/.bin/python3" -c '
@@ -82,8 +83,11 @@ ctx = ssl.create_default_context()
 r = urllib.request.urlopen("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", context=ctx, timeout=30)
 print(json.load(r)["tag_name"])' >"$TMP/net" 2>"$TMP/neterr"; then
 		ok "live TLS with the bundled CA (latest upstream: $(cat "$TMP/net"))"
-	else
+	elif [ "${YTDLP_NETWORK_TEST_STRICT-}" = 1 ]; then
 		bad "live TLS failed"
+		sed 's/^/    /' "$TMP/neterr"
+	else
+		say "  warn  live TLS failed (not fatal; set YTDLP_NETWORK_TEST_STRICT=1 to gate)"
 		sed 's/^/    /' "$TMP/neterr"
 	fi
 fi

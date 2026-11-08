@@ -1,17 +1,20 @@
 #!/bin/sh
 # armv7-anywrap.sh - turn an existing dynamically-linked armv7 ELF into a
-# self-contained "AnyLinux" armv7 bundle: its own loader, its own glibc, and the
-# whole DT_NEEDED closure taken from a sysroot. Nothing is rebuilt from source.
+# self-contained bundle: its own loader and the whole DT_NEEDED closure taken
+# from a sysroot. Nothing is rebuilt from source.
 #
-# Usage: armv7-anywrap.sh -r <sysroot> [-o <outdir>] <binary> [extra files/dirs...]
+#   ./armv7-anywrap.sh -r <sysroot> [-o <outdir>] <binary> [extra files/dirs...]
 #
-# The sysroot is any extracted armhf/armv7h tree (a Debian .deb set, an Arch
-# Linux ARM rootfs, an rpm2cpio dump). Only libs/loader are copied from it.
+# The sysroot is any extracted armhf/armv7h tree (a Debian .deb set, an Alpine
+# apk tree, an Arch Linux ARM rootfs). Only the loader and libraries are taken
+# from it.
 #
 # Output: <outdir>/lib  <outdir>/app  <outdir>/AppRun
-# The bundle runs on musl hosts, old glibc hosts and Android/Termux shells,
-# because it never consults the host's libc. What it cannot fix: the payload's
-# instruction set and its kernel/ABI requirements (see the report it prints).
+#
+# It prints the payload's CPU/FPU attributes and warns about what bundling
+# cannot fix: an instruction set above the armv7 baseline, a payload linked
+# statically against glibc, or a payload built against bionic. Those need a
+# rebuild, not a wrapper.
 
 set -eu
 

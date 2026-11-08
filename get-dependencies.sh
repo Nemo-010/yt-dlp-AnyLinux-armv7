@@ -7,7 +7,6 @@ pacman -Syu --noconfirm --needed \
 	base-devel        \
 	curl              \
 	git               \
-	p7zip             \
 	python            \
 	rustup            \
 	squashfs-tools    \

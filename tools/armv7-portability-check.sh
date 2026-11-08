@@ -1,7 +1,11 @@
 #!/bin/sh
 # armv7-portability-check.sh <binary>...
-# Checks whether an armv7 ELF can claim "runs on any armv7 Linux".
-# POSIX sh, needs readelf and strings only.
+#
+# Checks whether an armv7 ELF can claim "runs on any armv7 Linux": right machine,
+# right ABI, no interpreter, no dynamic libraries, and an instruction set at the
+# armv7-a / VFPv3-D16 / no-NEON baseline. Readelf and strings only.
+#
+# Exits non-zero if any binary fails, so it can gate a build.
 
 FAIL=0
 BASE_FP='VFPv3'   # VFPv3-D16 is the ARMv7 floor; VFPv4 uses vfma, absent on A8/A9

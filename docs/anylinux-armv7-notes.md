@@ -1,23 +1,27 @@
-# "Runs on any armv7 Linux" — CLI-only portability notes
+# "Runs on any armv7 Linux" — engineering notes
 
-Scope: command-line applications only, no GUI. Target: one artifact that runs on
-armv7 Linux everywhere — Debian/Raspbian armhf, Ubuntu armhf, Arch ARM armv7h,
-Alpine, postmarketOS, OpenWrt, a chroot, Termux on armv7 Android, and the adb
-shell on the same phone.
+Scope: command-line applications only, no GUI. The target is one artifact that
+runs on armv7 Linux everywhere — Debian/Raspbian armhf, Ubuntu armhf, Arch ARM
+armv7h, Alpine, postmarketOS, Void, a chroot, Termux on armv7 Android, and the
+adb shell on the same phone.
 
-Everything marked **verified** below was measured in this session with
-zig 0.17, rust 1.99, and `qemu-arm-static` 7.2 (host kernel 7.2; the ARM kernel
-floor is argued from musl's source, not measured).
+These are the notes behind this repository: what was measured, what was
+assumed, and why the pieces here exist. Everything marked **verified** was
+measured with zig 0.17, rust 1.99 and `qemu-arm-static` 7.2 on an x86_64 host;
+the ARM kernel floor is argued from musl's source rather than measured on old
+hardware, and is labelled as such.
 
-These are the engineering notes behind this repository. The scripts they refer
-to now live in `tools/`, the runtime in `src/`:
+Where the notes refer to a tool, it lives here:
 
-- `tools/armv7-portability-check.sh` — does a binary really claim "any armv7
-  Linux"? Runs in CI, see `make-appimage.sh`.
-- `tools/armv7-anywrap.sh` — turn an *existing* dynamic armv7 ELF into a bundle
-  with its own loader and libc; tested in §10.
-- `src/aruntime.c` — the static FUSE-less runtime, §12.
-- `patches/` — the armv7 ports of userland-execve-rust and Anylinux-sharun, §11.1.
+| path | what it is | section |
+|---|---|---|
+| `src/aruntime.c` | the static FUSE-less AppImage runtime | §12 |
+| `make-appimage.sh` | the build driver | §12.5 |
+| `tools/armv7-anywrap.sh` | DT_NEEDED closure walk over a sysroot | §10 |
+| `tools/armv7-portability-check.sh` | does a binary really claim "any armv7 Linux"? | §2 |
+| `tools/alpine-armv7-fetch.py` | dependency-resolving Alpine armv7 fetcher | §12.5 |
+| `tools/smoke-test.sh` | what CI runs | §13 |
+| `patches/` | armv7 ports of userland-execve-rust and Anylinux-sharun | §11.1 |
 
 ---
 
@@ -215,7 +219,7 @@ Two ways to use that slot, depending on size:
 
 ---
 
-## 8. What I would build, smallest first
+## 8. What this repository builds, smallest first
 
 1. **The checker is already written and passing/failing correctly**:
    `tools/armv7-portability-check.sh`. It reads ELF machine/class/EABI
@@ -674,3 +678,72 @@ armv7-anylinux-build.sh -s sharun-armv7 -r sysroot -n yt-dlp \
 `make-appimage.sh` defaults to `--runtime aruntime` and picks the matching
 compressor; `--runtime appimagekit` still exists for type-2 compatibility, with
 the glibc caveat from §11.2.
+
+---
+
+## 13. What this repository actually ships
+
+§12 ends with a tested artifact; this is the final shape and the reasoning that
+survives contact with CI.
+
+### 13.1 The pipeline
+
+```
+make-appimage.sh
+  ├── tools/build-armv7-tools.sh     aruntime + dash + sharun, all static armv7
+  ├── tools/alpine-armv7-fetch.py    Alpine edge apks -> sysroot
+  ├── assemble AppDir                .bin/, bin/, lib/, share/, AppRun, AppRun.sh
+  ├── mksquashfs -comp gzip -no-fragments
+  └── cat aruntime AppImage          -> dist/yt-dlp-armv7.AppImage
+```
+
+Three Anylinux stages, three substitutes, no invented approach:
+
+| Anylinux | here | why |
+|---|---|---|
+| `quick-sharun` (deploy) | fetch + `armv7-anywrap.sh` | no armv7 build; the closure is a DT_NEEDED walk regardless |
+| `sharun` (AppRun) | the same source, patched | two small patches, §11.1 |
+| `uruntime` (pack+run) | `src/aruntime.c` | uruntime needs FUSE and user namespaces, which Android does not grant |
+
+### 13.2 What CI proves, and what it cannot
+
+`tools/smoke-test.sh` runs the runtime for real, then checks the extracted tree:
+
+- the runtime finds the squashfs and extracts it completely (`.complete` marker)
+- every file the payload needs is present after extraction
+- `yt_dlp` imports and reports its version through the **bundled** loader
+- that version equals what the build intended (`dist/version`)
+- the CLI entry point agrees
+- `AppRun.sh` parses under the **bundled** dash, so a syntax error cannot reach
+  a user
+- with `YTDLP_NETWORK_TEST=1`, a live TLS request against the bundled CA
+
+It cannot check the single `execve` from the runtime into `AppRun`: qemu-user
+cannot nested-exec an armv7 binary, and CI has no armv7 hardware. That call is
+proven natively (§12.3) and is the one thing a device test settles.
+
+The network check is informative rather than gating by default — a DNS or
+upstream outage should not turn a good build red. `YTDLP_NETWORK_TEST_STRICT=1`
+makes it gating.
+
+### 13.3 Deliberate omissions
+
+- **No icon.** yt-dlp ships none and this repository will not invent one.
+- **No `.upd_info` / zsync.** `appimagetool` has no armv7 build and `aruntime`
+  does not implement self-updates. Writing update metadata we cannot honour
+  would make `appimageupdatetool` fail on every user's machine.
+- **No `.7z`, no archives.** The AppImage is the artifact. Any transport
+  compression of an already-compressed squashfs buys under one percent and
+  costs a second unpack step for every user.
+- **gzip squashfs.** The single biggest thing left on the table — zstd would
+  shrink the image materially — but `aruntime` has no zstd reader yet. The block
+  reader is compressor-agnostic; only the `uncompress()` call is zlib-specific.
+
+### 13.4 Where the next real win is
+
+Not compression, and not the wrapper: the 43 MB tree is 21 MB of Python
+standard library and 12 MB of `site-packages`, for a tool that uses a fraction
+of it. Pruning `ensurepip`, `tkinter`, `turtledemo`, `pydoc_data`, `unittest`,
+the `_test*` extension modules and the unused codecs would take more off than
+any compressor choice. That is a packaging problem inside the AppDir, and it is
+where a follow-up should start rather than in `src/aruntime.c`.

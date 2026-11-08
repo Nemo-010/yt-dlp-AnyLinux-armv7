@@ -119,14 +119,5 @@ echo
 printf '%s\n' "  $APPIMAGE"
 printf '  %-28s %10s bytes\n' "$(basename "$APPIMAGE")" "$(wc -c < "$APPIMAGE")"
 
-# An extra archive, because the AppImage is a touch too large for some upload
-# limits and 7z on an already-gzipped squashfs is the best that can be done
-# without a second compressor in the runtime.
-if command -v 7z >/dev/null 2>&1; then
-	7z a -bso0 -bsp0 -m0=ARM -m1=LZMA2:lc=0:pb=2:mf=bt4 -mx=9 \
-		"$APPIMAGE.7z" "$APPIMAGE" >/dev/null
-	printf '  %-28s %10s bytes\n' "$(basename "$APPIMAGE").7z" "$(wc -c < "$APPIMAGE.7z")"
-fi
-
 echo
 echo "Test it with ./tools/smoke-test.sh $APPIMAGE"

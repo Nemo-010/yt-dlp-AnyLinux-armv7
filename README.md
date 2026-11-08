@@ -48,8 +48,8 @@ pieces built here rather than a different approach invented.
 
 ## Building
 
-Needs `zig`, `rustup` with the pinned nightly, `squashfs-tools`, `python3`, `git`
-and `p7zip`. `get-dependencies.sh` installs all of it on Arch Linux, which is the
+Needs `zig`, `rustup` with the pinned nightly, `squashfs-tools`, `python3` and
+`git`. `get-dependencies.sh` installs all of it on Arch Linux, which is the
 only recommended build host.
 
 ```sh
@@ -57,11 +57,6 @@ only recommended build host.
 ./make-appimage.sh        # -> dist/yt-dlp-armv7.AppImage
 ./tools/smoke-test.sh dist/yt-dlp-armv7.AppImage
 ```
-
-`make-appimage.sh` also writes a `.7z` next to the AppImage. That is not part of
-Anylinux; it exists because the AppImage is a touch over some chat upload limits,
-and 7z with an ARM BCJ filter is the best that can be done on an already-gzipped
-squashfs (0.8% — the payload is compressed twice, so there is little left).
 
 ## Testing on Android
 
@@ -96,5 +91,27 @@ tools/smoke-test.sh           what CI runs
 docs/anylinux-armv7-notes.md  the long-form engineering notes
 ```
 
-No icon is shipped: yt-dlp has none upstream and this repository does not invent
-one.
+`docs/` is worth reading before changing the runtime or the patches: it records
+what was measured on real binaries, what could not be verified without armv7
+hardware, and why each deviation above exists.
+
+## Deliberate omissions
+
+- **No icon** — yt-dlp ships none and this repository will not invent one.
+- **No `.upd_info` / zsync** — there is no armv7 `appimagetool`, and `aruntime`
+  does not implement self-updates. Publishing update metadata that cannot be
+  honoured would break `appimageupdatetool` for every user.
+- **No transport archives** — the AppImage is the artifact. Recompressing an
+  already-compressed squashfs buys under one percent.
+
+## How it is verified
+
+CI runs `tools/smoke-test.sh`, which executes the runtime for real and checks
+that the squashfs extracts completely, that `yt_dlp` imports and reports the
+version the build intended through the *bundled* loader, and that `AppRun.sh`
+parses under the *bundled* dash. With `YTDLP_NETWORK_TEST=1` it also does a live
+TLS request using the bundled CA bundle.
+
+The one step CI cannot walk is the runtime's `execve` into `AppRun`: qemu-user
+cannot nested-exec an armv7 binary and there is no armv7 CI runner. That call is
+proven natively and is what the device test above settles.
