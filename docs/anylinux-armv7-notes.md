@@ -9,13 +9,15 @@ Everything marked **verified** below was measured in this session with
 zig 0.17, rust 1.99, and `qemu-arm-static` 7.2 (host kernel 7.2; the ARM kernel
 floor is argued from musl's source, not measured).
 
-Companion file: `armv7-portable-notes.md` holds the wider picture (GUI apps, the
-missing sharun/uruntime/onelf armv7 builds, why the AppImage shape is out of
-scope for CLI).
+These are the engineering notes behind this repository. The scripts they refer
+to now live in `tools/`, the runtime in `src/`:
 
-Scripts: `armv7-portability-check.sh` (does a binary really claim "any armv7
-Linux"?) and `armv7-anywrap.sh` (turn an *existing* dynamic armv7 ELF into a
-bundle with its own loader and glibc; tested in §10).
+- `tools/armv7-portability-check.sh` — does a binary really claim "any armv7
+  Linux"? Runs in CI, see `make-appimage.sh`.
+- `tools/armv7-anywrap.sh` — turn an *existing* dynamic armv7 ELF into a bundle
+  with its own loader and libc; tested in §10.
+- `src/aruntime.c` — the static FUSE-less runtime, §12.
+- `patches/` — the armv7 ports of userland-execve-rust and Anylinux-sharun, §11.1.
 
 ---
 
@@ -216,7 +218,7 @@ Two ways to use that slot, depending on size:
 ## 8. What I would build, smallest first
 
 1. **The checker is already written and passing/failing correctly**:
-   `/workspace/armv7-portability-check.sh`. It reads ELF machine/class/EABI
+   `tools/armv7-portability-check.sh`. It reads ELF machine/class/EABI
    version/hard-float flag, `PT_INTERP`, `DT_NEEDED`, `.ARM.attributes`
    (`CPU_arch`, `FP_arch`, NEON), glibc symbol versions, hardcoded loader paths,
    and flags `note` for the §5 environment files it finds referenced. Verified:
@@ -264,7 +266,7 @@ cargo build --release --target armv7-unknown-linux-musleabihf
 python3 -c 'import struct;e=open("blob","rb").read();p=open("payload.txt","rb").read();
 open("blob.bin","wb").write(e+p+struct.pack("<4sQQ",b"AV7B",len(e),len(p)))'
 ./qemu-arm-static ./blob.bin
-/workspace/armv7-portability-check.sh probe blob.bin rp
+tools/armv7-portability-check.sh probe blob.bin rp
 ```
 
 Not measured here, and the things worth measuring next on real hardware
@@ -279,7 +281,7 @@ environment shim actually removes the last host dependency on Termux and on the
 The question was whether "AnyLinux for armv7" requires building from source, or
 whether an existing dynamically-linked armv7 ELF can be made portable. Answer:
 **the libc/loader layer can be fixed without source; two other layers cannot.**
-Tested with a wrapper written for this: `armv7-anywrap.sh`.
+Tested with a wrapper written for this: `tools/armv7-anywrap.sh`.
 
 ```sh
 armv7-anywrap.sh -r <sysroot> [-o <outdir>] <binary> [extra files/dirs...]
@@ -385,7 +387,7 @@ So the rule of thumb: *portability of the loader/libc layer is a packaging
 problem (bundle it); portability of the instruction set and syscall layer is a
 build problem (rebuild it).* A release-artifact-only approach gets you the
 former and leaves the latter unknown unless you check the attributes — which is
-exactly what `armv7-portability-check.sh` and `armv7-anywrap.sh`'s report print.
+exactly what `armv7-portability-check.sh` and `tools/armv7-anywrap.sh`'s report print.
 
 ```sh
 # converting an existing dynamic armv7 binary instead of rebuilding it (§10)
@@ -406,11 +408,11 @@ alternative or built:
 
 | stage | upstream armv7? | what was used |
 |---|---|---|
-| deploy closure | quick-sharun: no | `armv7-anywrap.sh` (§10) — DT_NEEDED walk over a sysroot |
+| deploy closure | quick-sharun: no | `tools/armv7-anywrap.sh` (§10) — DT_NEEDED walk over a sysroot |
 | AppRun / loader | sharun 3.8.3: no | **sharun built for `armv7-unknown-linux-musleabihf`** (patch below) |
 | pack | uruntime 0.8.1, appimagetool 0.5.6: no | **AppImageKit `runtime-armhf`** + host `mksquashfs` |
 | squashfs tools | n/a (packing is arch-neutral) | squashfs-tools 4.6.1 built for the *build host* |
-| build driver | quick-sharun: no | `armv7-quick-appimage.sh` (§11.3) |
+| build driver | quick-sharun: no | `make-appimage.sh` (§11.3) |
 
 ### 11.1 The two patches that make the toolchain exist
 
@@ -471,7 +473,7 @@ AppImageKit runtime is a working stopgap that shows the format is sound.
 
 ### 11.3 The driver script
 
-`armv7-quick-appimage.sh` mirrors quick-sharun's shape: sysroot in, AppDir out,
+`make-appimage.sh` mirrors quick-sharun's shape: sysroot in, AppDir out,
 AppImage out, compressor/level from the environment, no interactivity (CI-safe).
 
 ```sh
@@ -519,7 +521,7 @@ because AppImageKit's `appimagetool-armhf` was not usable here (it needs
 §11 got the format right but the wrapper wrong: AppImageKit's `runtime-armhf` is
 dynamically linked to glibc, so the AppImage needed a glibc host and could never
 run on Termux. That is a non-starter for the actual goal, so the runtime was
-replaced with one written for this: **`aruntime`** (`/workspace/aruntime.c`,
+replaced with one written for this: **`aruntime`** (`src/aruntime.c`,
 67 KB static, `VFPv3`, no NEON, no `PT_INTERP`, no `DT_NEEDED`).
 
 What it does: finds the appended squashfs, reads it itself, extracts to a cache
@@ -603,7 +605,7 @@ The remaining risk is small and is exactly what the device test below settles.
 
 ### 12.4 Testing it yourself on Android / Termux
 
-Artifact: `/workspace/yt-dlp-armv7.AppImage` (16 MB).
+Artifact: `dist/yt-dlp-armv7.AppImage` from `make-appimage.sh` (16 MB).
 
 **Termux (armv7 device, no root):**
 
@@ -669,6 +671,6 @@ armv7-anylinux-build.sh -s sharun-armv7 -r sysroot -n yt-dlp \
     --runtime aruntime -o out sysroot/usr/bin/yt-dlp
 ```
 
-`armv7-anylinux-build.sh` defaults to `--runtime aruntime` and picks the matching
+`make-appimage.sh` defaults to `--runtime aruntime` and picks the matching
 compressor; `--runtime appimagekit` still exists for type-2 compatibility, with
 the glibc caveat from §11.2.
