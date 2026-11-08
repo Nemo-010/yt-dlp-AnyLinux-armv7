@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=yt-dlp
+GenericName=Video downloader
+Comment=Download videos
+Exec=yt-dlp
+Terminal=true
+Categories=Utility;Network;
+Keywords=youtube;video;download;
+X-AppImage-Version=@VERSION@
